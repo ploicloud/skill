@@ -18,21 +18,31 @@ Run `/pc-deploy` from any project directory and the skill will:
 - A [Ploi Cloud](https://ploi.cloud/register) account
 - The Ploi Cloud MCP server connected:
   ```bash
-  claude mcp add ploi-cloud --url https://ploi.cloud/mcp
+  claude mcp add --transport http ploi-cloud https://ploi.cloud/mcp
   ```
 
 ## Install
 
-Global (available in all projects):
+**All tools**
+
+Auto-detects your AI harness and installs to the right location:
 
 ```bash
-claude skill add --global https://github.com/ploicloud/skill
+npx skills add ploicloud/skill
 ```
 
-Per-project:
+**Claude Code**
 
 ```bash
-claude skill add https://github.com/ploicloud/skill
+git clone https://github.com/ploicloud/skill ~/.claude/skills/pc-deploy
+```
+
+**Manual**
+
+Clone into your project's `.claude/skills/` directory:
+
+```bash
+git clone https://github.com/ploicloud/skill .claude/skills/pc-deploy
 ```
 
 ## Usage

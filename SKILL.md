@@ -48,7 +48,7 @@ Deploy the current project to Ploi Cloud directly from your editor. Scans the pr
 The Ploi Cloud MCP server must be connected. If not configured, tell the user to run:
 
 ```
-claude mcp add ploi-cloud --url https://ploi.cloud/mcp
+claude mcp add --transport http ploi-cloud https://ploi.cloud/mcp
 ```
 
 ## Phase 1: Git validation
