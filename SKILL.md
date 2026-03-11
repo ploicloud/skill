@@ -1,6 +1,6 @@
 ---
 name: pc-deploy
-description: Deploy the current project to Ploi Cloud. Detects project type, creates or updates the app via MCP, deploys, monitors, and auto-fixes failures. Requires a git repo with a remote URL.
+description: Deploy the current project to Ploi Cloud. Detects project type, creates or updates the app via MCP, deploys, monitors, and auto-fixes failures. Supports both git repos and upload-based deployments.
 user-invocable: true
 allowed-tools:
   - Bash
@@ -37,11 +37,12 @@ allowed-tools:
   - mcp__ploi-cloud-mcp__v1_applications_services_update
   - mcp__ploi-cloud-mcp__applications_volumes_store
   - mcp__ploi-cloud-mcp__applications_domains_store
+  - mcp__ploi-cloud-mcp__applications_source_upload
 ---
 
 # Deploy to Ploi Cloud
 
-Deploy the current project to Ploi Cloud directly from your editor. Scans the project, creates or updates the application via MCP, deploys, monitors, and auto-fixes failures.
+Deploy the current project to Ploi Cloud directly from your editor. Scans the project, creates or updates the application via MCP, deploys, monitors, and auto-fixes failures. Works with git repositories and projects without a repo (via source upload).
 
 ## Prerequisites
 
@@ -51,14 +52,18 @@ The Ploi Cloud MCP server must be connected. If not configured, tell the user to
 claude mcp add --transport http ploi-cloud https://ploi.cloud/mcp
 ```
 
-## Phase 1: Git validation
+## Phase 1: Source validation
 
-These checks are mandatory. Abort with a clear message if any fail.
+Determine the deployment mode: **git** or **upload**.
 
-1. Run `git rev-parse --git-dir` — abort if not a git repo
-2. Run `git remote get-url origin` — abort if no remote URL
-3. Parse the remote URL to extract owner and repo name (supports github.com, gitlab.com, bitbucket.org)
-4. Run `git branch --show-current` to get the current branch
+1. Run `git rev-parse --git-dir` to check if this is a git repo
+2. If it is a git repo, run `git remote get-url origin` to check for a remote URL
+3. **If both succeed** → **git mode**
+   - Parse the remote URL to extract owner and repo name (supports github.com, gitlab.com, bitbucket.org)
+   - Run `git branch --show-current` to get the current branch
+4. **If either fails** (not a git repo, or no remote URL) → **upload mode**
+   - Derive the application name from the current directory name (lowercase, hyphens, 4-32 chars)
+   - Inform the user: "No git repository detected — deploying via source upload."
 
 ## Phase 2: Project detection
 
@@ -112,26 +117,53 @@ Scan local files to determine the project type and requirements.
 ## Phase 3: Check existing app
 
 1. Call `applications_index` to list all apps
-2. Search for an app whose repository URL matches the current project's remote URL
-3. If found → go to Phase 4b (update)
-4. If not found → go to Phase 4a (create)
+2. **Git mode:** search for an app whose repository URL matches the current project's remote URL
+3. **Upload mode:** search for an app whose name matches the derived directory name AND has `source_type` = `upload`
+4. If found → go to Phase 4b (update)
+5. If not found → go to Phase 4a (create)
 
 ## Phase 4a: Create application
 
+**Git mode:**
 1. `applications_store` — create with name (repo name), type, repository URL, owner, name, branch
+
+**Upload mode:**
+1. `applications_store` — create with name (directory name), type, and `source_type: "upload"`. Do NOT pass repository fields.
+
+**Both modes (continue):**
 2. `applications_build-config_update` — set build commands and init commands
 3. `applications_settings_update` — set health_check_path (/ for most types, /up for Statamic)
 4. `applications_php-config_update` — set PHP version and extensions (PHP apps only)
 5. `v1_applications_services_store` — create each detected service (memory: 512Mi, volume_size: 5Gi)
 6. `applications_secrets_store` — add required secrets only
-7. Go to Phase 5
+7. Go to Phase 4c (upload mode) or Phase 5 (git mode)
 
 ## Phase 4b: Update existing application
 
+**Git mode:**
 1. `applications_repository_update` — update repo URL and branch if changed
+
+**Both modes (continue):**
 2. `applications_build-config_update` — update build commands if needed
 3. `v1_applications_services_index` — check existing services, add any missing via `v1_applications_services_store`
-4. Go to Phase 5
+4. Go to Phase 4c (upload mode) or Phase 5 (git mode)
+
+## Phase 4c: Upload source archive (upload mode only)
+
+Skip this phase entirely in git mode.
+
+1. Determine which ignore file to use:
+   - Use `.dockerignore` if it exists
+   - Otherwise use `.gitignore` if it exists
+   - Otherwise no exclusions
+2. Create a tar.gz archive of the project directory:
+   ```
+   tar czf /tmp/ploi-source-upload.tar.gz --exclude='.git' --exclude='node_modules' --exclude='.DS_Store' -X <ignore-file> -C <project-dir> .
+   ```
+   If no ignore file exists, omit the `-X` flag. Always exclude `.git`, `node_modules`, and `.DS_Store`.
+3. Call `applications_source_upload` with the archive file to upload it to the application
+4. Clean up the temp file: `rm /tmp/ploi-source-upload.tar.gz`
+5. Go to Phase 5
 
 ## Phase 5: Deploy
 
@@ -170,8 +202,9 @@ Maximum 5 retry attempts. Diagnose the failure and apply a fix.
 | Database connection error | Check service exists, verify env var injection |
 
 After applying a fix:
-1. Call `applications_deploy` to redeploy
-2. Return to Phase 6 (Monitor)
+1. **Upload mode:** re-run Phase 4c to re-upload source if build commands changed local output
+2. Call `applications_deploy` to redeploy
+3. Return to Phase 6 (Monitor)
 
 ## Phase 8: Success
 
@@ -179,6 +212,7 @@ After applying a fix:
 2. Confirm with `applications_debug_summary` that pods are healthy
 3. Report to the user:
    - Application name
+   - Deployment mode (git or upload)
    - Live URL (the auto-assigned domain)
    - Application ID
    - Services created
@@ -196,3 +230,5 @@ After applying a fix:
 - Build commands run as root, but the application runtime runs as www-data (non-root). Build-time operations like `npm install -g` work fine
 - Application status values: `starting`, `active`, `deploying`, `stopping`, `stopped`, `destroying`, `failed`. Use `active` to confirm the app is live
 - Deployment status values: `pending`, `running`, `success`, `failed`, `cancelled`. Note that `running` means the build is in progress, not that the app is live
+- Upload-type applications do NOT support `skip_build` (redeploy) — every deployment runs a full build
+- When creating the tar.gz for upload, always exclude `.git`, `node_modules`, and `.DS_Store` at minimum
