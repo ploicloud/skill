@@ -37,7 +37,7 @@ allowed-tools:
   - mcp__ploi-cloud-mcp__v1_applications_services_update
   - mcp__ploi-cloud-mcp__applications_volumes_store
   - mcp__ploi-cloud-mcp__applications_domains_store
-  - mcp__ploi-cloud-mcp__applications_source_upload
+  - mcp__ploi-cloud-mcp__applications_source_upload_url
 ---
 
 # Deploy to Ploi Cloud
@@ -161,9 +161,14 @@ Skip this phase entirely in git mode.
    tar czf /tmp/ploi-source-upload.tar.gz --exclude='.git' --exclude='node_modules' --exclude='.DS_Store' -X <ignore-file> -C <project-dir> .
    ```
    If no ignore file exists, omit the `-X` flag. Always exclude `.git`, `node_modules`, and `.DS_Store`.
-3. Call `applications_source_upload` with the archive file to upload it to the application
-4. Clean up the temp file: `rm /tmp/ploi-source-upload.tar.gz`
-5. Go to Phase 5
+3. Call `applications_source_upload_url` with the application ID to get a signed upload URL
+4. Upload the archive directly using curl:
+   ```
+   curl -s -X POST -F 'source=@/tmp/ploi-source-upload.tar.gz' '<upload_url>'
+   ```
+   Verify the response contains `"success": true`.
+5. Clean up the temp file: `rm /tmp/ploi-source-upload.tar.gz`
+6. Go to Phase 5
 
 ## Phase 5: Deploy
 
